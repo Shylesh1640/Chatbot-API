@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kodi · programming tutor</title>
+<style>
+  :root {
+    --paper: #f6f4ee; --grid: #e4e0d3; --ink: #20242c; --muted: #6a6f7a;
+    --me: #2b3a67; --me-ink: #f6f4ee; --bot: #ffffff; --line: #d8d3c4;
+    --accent: #2b3a67; --err-bg: #fdecea; --err-ink: #8a1c13; --code: #eceae0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16181d; --grid: #20232a; --ink: #e8e6df; --muted: #9a9ea8;
+      --me: #7d92d6; --me-ink: #11141b; --bot: #1f2229; --line: #30343d;
+      --accent: #7d92d6; --err-bg: #3a1d1b; --err-ink: #ffb4aa; --code: #14161b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+    color: var(--ink);
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; justify-content: center;
+  }
+  .app { width: min(760px, 100%); height: 100%; display: flex; flex-direction: column; padding: 0 16px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; padding: 20px 0 12px; }
+  h1 { margin: 0; font: 600 22px/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: -.01em; }
+  h1 small { font: 400 14px ui-sans-serif, system-ui, sans-serif; color: var(--muted); margin-left: 10px; }
+  .status { font-size: 13px; color: var(--muted); margin-right: 8px; }
+  button { font: inherit; cursor: pointer; }
+  button.ghost { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 12px; }
+  button.ghost:hover { border-color: var(--accent); }
+  button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #log { flex: 1; overflow-y: auto; padding: 8px 0 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 86%; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line); white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: var(--me); color: var(--me-ink); border-color: var(--me); border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--bot); border-bottom-left-radius: 4px; }
+  .msg.error { align-self: stretch; max-width: 100%; background: var(--err-bg); color: var(--err-ink); border-color: var(--err-ink); display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+  .msg.error button { color: var(--err-ink); border-color: var(--err-ink); }
+  .msg pre { background: var(--code); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; white-space: pre; }
+  .msg code { font: 14px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .msg :not(pre) > code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  .empty { margin: auto; text-align: center; color: var(--muted); max-width: 420px; }
+  .empty p { margin: 0 0 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .typing { color: var(--muted); font-style: italic; }
+  form { display: flex; gap: 8px; padding: 12px 0 20px; }
+  textarea { flex: 1; resize: none; height: 48px; max-height: 140px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font: inherit; background: var(--bot); color: var(--ink); }
+  #send { background: var(--accent); color: var(--me-ink); border: 0; border-radius: 12px; padding: 0 20px; font-weight: 600; }
+  #send:disabled { opacity: .5; cursor: not-allowed; }
+  @media (prefers-reduced-motion: no-preference) { .msg { animation: in .15s ease-out; } @keyframes in { from { opacity: 0; transform: translateY(4px); } } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>kodi<small>programming tutor</small></h1>
+    <div><span class="status" id="status"></span><button class="ghost" id="reset" type="button">New chat</button></div>
+  </header>
+  <main id="log" aria-live="polite"></main>
+  <form id="form">
+    <textarea id="input" rows="1" placeholder="Ask about code, errors, or what to learn next…" aria-label="Message"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+</div>
+<script>
+const log = document.getElementById('log'), form = document.getElementById('form'),
+      input = document.getElementById('input'), send = document.getElementById('send'),
+      statusEl = document.getElementById('status');
+let conversationId = null, lastText = '';
+
+const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function render(text) {           // escape first, then add code fences / inline code
+  return esc(text)
+    .replace(/```(\w+)?\n?([\s\S]*?)```/g, (_, l, c) => `<pre><code>${c.replace(/\n$/, '')}</code></pre>`)
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>');
+}
+function add(cls, html) {
+  const d = document.createElement('div'); d.className = 'msg ' + cls; d.innerHTML = html;
+  log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
+}
+function showEmpty() {
+  log.innerHTML = `<div class="empty"><p>Hi, I'm Kodi. Paste an error, ask how something works, or tell me what you're trying to build.</p>
+  <div class="chips">
+    <button class="ghost" type="button">Explain Python list comprehensions</button>
+    <button class="ghost" type="button">Why do I get "undefined is not a function"?</button>
+  </div></div>`;
+  log.querySelectorAll('.chips button').forEach(b => b.onclick = () => { input.value = b.textContent; form.requestSubmit(); });
+}
+function showError(msg) {
+  const d = add('error', `<span>${esc(msg)}</span>`);
+  const b = document.createElement('button'); b.className = 'ghost'; b.type = 'button'; b.textContent = 'Retry';
+  b.onclick = () => { d.remove(); input.value = lastText; form.requestSubmit(); };
+  d.appendChild(b);
+}
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  const text = input.value.trim(); if (!text || send.disabled) return;
+  log.querySelector('.empty')?.remove();
+  lastText = text; add('user', esc(text)); input.value = ''; send.disabled = true;
+  const typing = add('bot typing', 'Kodi is thinking…');
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 45000);
+    const res = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: text, conversation_id: conversationId }), signal: ctrl.signal });
+    clearTimeout(t);
+    const data = await res.json().catch(() => ({}));
+    typing.remove();
+    if (!res.ok) { showError(data.error || `Request failed (HTTP ${res.status}).`); }
+    else {
+      conversationId = data.conversation_id; add('bot', render(data.reply));
+      statusEl.textContent = data.meta.has_summary ? 'older messages summarised' : '';
+    }
+  } catch (err) {
+    typing.remove();
+    showError(err.name === 'AbortError' ? 'The server took too long to answer.' : 'Could not reach the server. Is it running?');
+  } finally { send.disabled = false; input.focus(); }
+});
+input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+document.getElementById('reset').onclick = () => {
+  if (conversationId) fetch('/api/reset', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ conversation_id: conversationId }) });
+  conversationId = null; statusEl.textContent = ''; showEmpty();
+};
+showEmpty();
+</script>
+</body>
+</html>
